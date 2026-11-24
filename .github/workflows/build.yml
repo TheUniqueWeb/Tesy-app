@@ -1,0 +1,76 @@
+name: Unpack & Build APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Unpack project.txt
+        run: |
+          python3 - << 'EOF'
+          import os, re
+
+          if not os.path.exists("project.txt"):
+              print("project.txt পাওয়া যায়নি, স্কিপ করা হলো।")
+              exit(0)
+
+          with open("project.txt", "r", encoding="utf-8") as f:
+              content = f.read().replace("\r\n", "\n")
+
+          pattern = re.compile(r"===FILE:\s*(.+?)\s*===\s*\n(.*?)\n\s*===END_FILE===", re.DOTALL)
+          matches = pattern.findall(content)
+
+          if not matches:
+              raise ValueError("project.txt ফরম্যাট সঠিক নয়!")
+
+          for filepath, code in matches:
+              filepath = filepath.strip().lstrip("/")
+              if filepath.startswith(".github/"):
+                  continue
+              parent = os.path.dirname(filepath)
+              if parent:
+                  os.makedirs(parent, exist_ok=True)
+              with open(filepath, "w", encoding="utf-8") as out:
+                  out.write(code.rstrip() + "\n")
+              print(f"Created: {filepath}")
+          EOF
+
+      - name: Save unpacked files to Repo
+        continue-on-error: true
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .
+          git diff --staged --quiet || (git commit -m "Auto-unpacked from project.txt" && git push)
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Build Debug APK
+        run: gradle assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: TeleVault-debug.apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          archive: false
